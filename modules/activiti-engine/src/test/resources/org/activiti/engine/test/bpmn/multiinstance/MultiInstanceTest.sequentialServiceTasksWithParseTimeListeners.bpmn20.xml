@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions id="definition"
+             xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:activiti="http://activiti.org/bpmn"
+             targetNamespace="Examples">
+  <process id="miSequentialServiceTasksWithServiceTaskParseHandler">
+    <startEvent id="theStart"/>
+
+    <sequenceFlow id="flow1" sourceRef="theStart" targetRef="serviceTaskWithParseHandlerExecutionListener"/>
+
+    <serviceTask id="serviceTaskWithParseHandlerExecutionListener" name="Do stuff"
+                 activiti:expression="${execution.setVariable('runCount', execution.getVariable('runCount') + 1)}">
+      <extensionElements/>
+      <multiInstanceLoopCharacteristics isSequential="true">
+        <loopCardinality>${nrOfLoops}</loopCardinality>
+        <completionCondition>${nrOfCompletedInstances == 3}</completionCondition>
+      </multiInstanceLoopCharacteristics>
+    </serviceTask>
+
+    <sequenceFlow id="flow3" sourceRef="serviceTaskWithParseHandlerExecutionListener" targetRef="userTask"/>
+
+    <userTask id="userTask"/>
+
+    <sequenceFlow id="flow4" sourceRef="userTask" targetRef="theEnd"/>
+
+    <endEvent id="theEnd"/>
+  </process>
+</definitions>

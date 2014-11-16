@@ -19,21 +19,30 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import org.activiti.bpmn.model.ServiceTask;
+import org.activiti.engine.delegate.ExecutionListener;
 import org.activiti.engine.history.HistoricActivityInstance;
 import org.activiti.engine.history.HistoricProcessInstance;
 import org.activiti.engine.history.HistoricTaskInstance;
+import org.activiti.engine.impl.bpmn.deployer.BpmnDeployer;
+import org.activiti.engine.impl.bpmn.parser.BpmnParseHandlers;
 import org.activiti.engine.impl.history.HistoryLevel;
 import org.activiti.engine.impl.test.PluggableActivitiTestCase;
 import org.activiti.engine.impl.util.CollectionUtil;
+import org.activiti.engine.parse.BpmnParseHandler;
 import org.activiti.engine.runtime.Execution;
 import org.activiti.engine.runtime.Job;
 import org.activiti.engine.runtime.ProcessInstance;
 import org.activiti.engine.task.Task;
 import org.activiti.engine.task.TaskQuery;
 import org.activiti.engine.test.Deployment;
+import org.activiti.engine.test.bpmn.servicetask.ExecutionListenerRegistererServiceTaskParseHandler;
+import org.activiti.engine.test.bpmn.servicetask.ServiceTaskEndExecutionListener;
+import org.activiti.engine.test.bpmn.servicetask.ServiceTaskStartExecutionListener;
 
 
 /**
@@ -1157,4 +1166,72 @@ public class MultiInstanceTest extends PluggableActivitiTestCase {
     assertProcessEnded(processInstance.getId());
   }
 
+  @Deployment(resources = {"org/activiti/engine/test/bpmn/multiinstance/MultiInstanceTest.sequentialServiceTasksWithListeners.bpmn20.xml"})
+  public void testSequentialServiceTasksWithListeners() {
+    Map<String, Object> variables = new HashMap<String, Object>();
+    variables.put("nrOfLoops", 3);
+    variables.put("startCount", 0L);
+    variables.put("runCount", 0L);
+    variables.put("endCount", 0L);
+    // Start process
+    String procId = runtimeService.startProcessInstanceByKey("miSequentialServiceTasks", variables).getId();
+
+    Map<String, Object> variablesAfterRun = runtimeService.getVariables(procId);
+    assertEquals(3L, variablesAfterRun.get("startCount"));
+    assertEquals(3L, variablesAfterRun.get("runCount"));
+    assertEquals(3L, variablesAfterRun.get("endCount"));
+  }
+
+  public void testSequentialServiceTasksWithParseTimeAddedListeners() {
+    final BpmnDeployer bpmnDeployer = processEngineConfiguration.getBpmnDeployer();
+    final BpmnParseHandlers bpmnParserHandlers = bpmnDeployer.getBpmnParser().getBpmnParserHandlers();
+    final List<BpmnParseHandler> serviceTaskParseHandlers = bpmnParserHandlers.getHandlersFor(ServiceTask.class);
+    final int serviceTaskParseHandlersSize = serviceTaskParseHandlers.size();
+    final List<BpmnParseHandler> removedServiceTaskParseHandlers = new ArrayList<BpmnParseHandler>(serviceTaskParseHandlersSize);
+
+    //remove default parse handlers because they should be replaced like replaced at org/activiti/engine/impl/cfg/ProcessEngineConfigurationImpl.java:1036
+    //but they will be re-added after assertions are OK
+    for (Iterator<BpmnParseHandler> iterator = serviceTaskParseHandlers.iterator(); iterator.hasNext(); ) {
+      BpmnParseHandler next = iterator.next();
+      removedServiceTaskParseHandlers.add(next);
+      iterator.remove();
+    }
+
+    final ExecutionListener startExecutionListener = new ServiceTaskStartExecutionListener();
+    final ExecutionListener endExecutionListener = new ServiceTaskEndExecutionListener();
+    final ExecutionListenerRegistererServiceTaskParseHandler serviceTaskParseHandler = new ExecutionListenerRegistererServiceTaskParseHandler(startExecutionListener, endExecutionListener);
+    bpmnParserHandlers.addHandler(serviceTaskParseHandler);
+
+    final org.activiti.engine.repository.Deployment deploy = repositoryService.
+        createDeployment().
+        addClasspathResource("org/activiti/engine/test/bpmn/multiinstance/MultiInstanceTest.sequentialServiceTasksWithParseTimeListeners.bpmn20.xml").
+        deploy();
+
+    Map<String, Object> variables = new HashMap<String, Object>();
+    variables.put("nrOfLoops", 3);
+    variables.put("startCount", 0L);
+    variables.put("runCount", 0L);
+    variables.put("endCount", 0L);
+
+    // Start process
+    String procId = runtimeService.startProcessInstanceByKey("miSequentialServiceTasksWithServiceTaskParseHandler", variables).getId();
+
+    Map<String, Object> variablesAfterRun = runtimeService.getVariables(procId);
+    assertEquals(3L, variablesAfterRun.get("startCount"));
+    assertEquals(3L, variablesAfterRun.get("runCount"));
+    assertEquals(3L, variablesAfterRun.get("endCount"));
+
+    final Task userTask = taskService.createTaskQuery().processInstanceId(procId).taskDefinitionKey("userTask").singleResult();
+    taskService.complete(userTask.getId());
+    assertProcessEnded(procId);
+
+    repositoryService.deleteDeployment(deploy.getId());
+
+    //remove custom parse handler
+    serviceTaskParseHandlers.remove(serviceTaskParseHandler);
+    //put original parse handler back
+    bpmnParserHandlers.addHandlers(removedServiceTaskParseHandlers);
+    //control the size with start value
+    assertEquals(serviceTaskParseHandlersSize, serviceTaskParseHandlers.size());
+  }
 }
